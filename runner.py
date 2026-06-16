@@ -19,8 +19,8 @@ def _snapshot_state(state: GraphState) -> GraphState:
     return snapshot
 
 
-def stream_graph(graph: Any, question: str) -> Iterator[StepEvent]:
-    state: GraphState = {"question": question, "trace": []}
+def stream_graph(graph: Any, message: str) -> Iterator[StepEvent]:
+    state: GraphState = {"message": message, "trace": []}
 
     for chunk in graph.stream(state, stream_mode="updates"):
         for node, update in chunk.items():
@@ -32,10 +32,10 @@ def stream_graph(graph: Any, question: str) -> Iterator[StepEvent]:
             yield StepEvent(node=node, update=update, state=_snapshot_state(state))
 
 
-def run_graph(graph: Any, question: str) -> GraphState:
-    state: GraphState = {"question": question, "trace": []}
+def run_graph(graph: Any, message: str) -> GraphState:
+    state: GraphState = {"message": message, "trace": []}
 
-    for event in stream_graph(graph, question):
+    for event in stream_graph(graph, message):
         state = event.state
 
     return state

@@ -12,68 +12,82 @@ def main() -> None:
         page_icon="🧭",
         layout="wide",
     )
-    st.title("Interactive LangGraph + Ollama Demo")
+    st.title("Technical Support Classifier Chatbot")
     st.caption(
-        "See how a question moves through classification, conditional routing, "
-        "and answer generation."
+        "Chat with a support bot that classifies each message and routes it to "
+        "billing, technical, account, or general support."
     )
 
     if "executed" not in st.session_state:
         st.session_state.executed = []
     if "result" not in st.session_state:
         st.session_state.result = None
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
 
     left, right = st.columns([1.2, 1])
 
     with left:
-        st.subheader("Execution Graph")
+        st.subheader("Support Triage Graph")
         graph_slot = st.empty()
         graph_slot.graphviz_chart(graph_dot(st.session_state.executed))
         st.write(
-            "Green nodes have already run for the current question. "
-            "Blue nodes have not been part of the route yet."
+            "Green nodes ran for the latest message. Blue nodes were not part "
+            "of the selected support route."
         )
 
     with right:
-        st.subheader("Question")
-        with st.form("question_form"):
-            question = st.text_input(
-                "Question",
-                placeholder="Example: Explain what a Python decorator is",
-            )
-            submitted = st.form_submit_button("Run Graph")
+        st.subheader("Chat")
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"]):
+                st.write(message["content"])
 
-        if submitted:
-            if not question.strip():
-                st.warning("Enter a question before running the graph.")
-            else:
-                st.session_state.executed = []
-                st.session_state.result = None
-                graph_slot.graphviz_chart(graph_dot(st.session_state.executed))
+        prompt = st.chat_input(
+            "Describe your support issue, e.g. I was charged twice"
+        )
 
-                try:
-                    graph = build_graph(OllamaTextModel())
-                    with st.status("Running graph...", expanded=True) as status:
-                        for event in stream_graph(graph, question.strip()):
-                            st.session_state.executed.append(event.node)
-                            graph_slot.graphviz_chart(
-                                graph_dot(st.session_state.executed)
-                            )
-                            st.write(f"Executed node: `{event.node}`")
-                            st.write(f"Update: `{event.update}`")
-                            st.session_state.result = dict(event.state)
-                        status.update(
-                            label="Execution complete",
-                            state="complete",
-                            expanded=False,
-                        )
-                except OllamaUnavailableError as exc:
-                    st.error(str(exc))
+        if prompt:
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            st.session_state.executed = []
+            st.session_state.result = None
+            graph_slot.graphviz_chart(graph_dot(st.session_state.executed))
+
+            with st.chat_message("user"):
+                st.write(prompt)
+
+            try:
+                graph = build_graph(OllamaTextModel())
+                with st.status("Classifying support message...", expanded=True) as status:
+                    for event in stream_graph(graph, prompt):
+                        st.session_state.executed.append(event.node)
+                        graph_slot.graphviz_chart(graph_dot(st.session_state.executed))
+                        st.write(f"Executed node: `{event.node}`")
+                        st.write(f"Update: `{event.update}`")
+                        st.session_state.result = dict(event.state)
+                    status.update(
+                        label="Support route complete",
+                        state="complete",
+                        expanded=False,
+                    )
+
+                answer = st.session_state.result.get(
+                    "answer", "No support response generated."
+                )
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": answer}
+                )
+                with st.chat_message("assistant"):
+                    st.write(answer)
+            except OllamaUnavailableError as exc:
+                error = str(exc)
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": f"Error: {error}"}
+                )
+                st.error(error)
 
     if st.session_state.result:
         result = st.session_state.result
-        st.subheader("Result")
-        st.write(result.get("answer", "No answer generated."))
+        st.subheader("Latest Triage Result")
 
         metric_a, metric_b = st.columns(2)
         metric_a.metric("Category", result.get("category", "no category"))
@@ -89,13 +103,13 @@ def main() -> None:
         """
         ### Concepts
 
-        **State:** shared data that moves between nodes, such as the question,
-        category, answer, and trace.
+        **State:** shared data that moves between nodes, such as the support
+        message, category, answer, and trace.
 
         **Node:** a graph function that reads state and returns updates.
 
-        **Conditional edge:** a decision that chooses the next node from part
-        of the state, in this case the category.
+        **Conditional edge:** a decision that chooses the next support route
+        from part of the state, in this case the category.
 
         **Stream:** step-by-step execution events that show the path as it runs.
         """

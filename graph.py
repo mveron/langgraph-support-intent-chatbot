@@ -6,7 +6,7 @@ from typing_extensions import Required, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 
-Category = Literal["technical", "general"]
+Category = Literal["billing", "technical", "account", "general"]
 
 
 class TextModel(Protocol):
@@ -14,7 +14,7 @@ class TextModel(Protocol):
 
 
 class GraphState(TypedDict, total=False):
-    question: Required[str]
+    message: Required[str]
     category: Category
     answer: str
     trace: Annotated[list[str], operator.add]
@@ -28,58 +28,90 @@ class GraphUpdate(TypedDict, total=False):
 
 def normalize_category(raw: str) -> Category:
     normalized = raw.strip().lower()
-    return "technical" if normalized == "technical" else "general"
+    if normalized in {"billing", "technical", "account"}:
+        return normalized
+    return "general"
 
 
 def build_graph(model: TextModel):
-    def classify(state: GraphState) -> GraphUpdate:
+    def classify_ticket(state: GraphState) -> GraphUpdate:
         prompt = (
-            "Classify the question as technical or general. "
-            "Answer with exactly one word: technical or general.\n"
-            f"Question: {state['question']}\n/no_think"
+            "Classify this support message as billing, technical, account, "
+            "or general. Answer with exactly one word from that list.\n"
+            f"Support message: {state['message']}\n/no_think"
         )
         category = normalize_category(model.generate(prompt))
         return {
             "category": category,
-            "trace": [f"classify: category={category}"],
+            "trace": [f"classify_ticket: category={category}"],
         }
 
-    def answer_technical(state: GraphState) -> GraphUpdate:
+    def billing_support(state: GraphState) -> GraphUpdate:
         prompt = (
-            "Answer as a technical specialist.\n"
-            f"Question: {state['question']}\n/no_think"
+            "You are a billing support specialist. Acknowledge the issue, ask "
+            "for invoice or payment details if needed, and explain the next step.\n"
+            f"Support message: {state['message']}\n/no_think"
         )
         return {
             "answer": model.generate(prompt).strip(),
-            "trace": ["answer_technical: answer generated"],
+            "trace": ["billing_support: answer generated"],
         }
 
-    def answer_general(state: GraphState) -> GraphUpdate:
+    def technical_support(state: GraphState) -> GraphUpdate:
         prompt = (
-            "Answer as a general assistant.\n"
-            f"Question: {state['question']}\n/no_think"
+            "You are a technical support specialist. Ask for the error message, "
+            "environment, and reproduction steps when useful.\n"
+            f"Support message: {state['message']}\n/no_think"
         )
         return {
             "answer": model.generate(prompt).strip(),
-            "trace": ["answer_general: answer generated"],
+            "trace": ["technical_support: answer generated"],
+        }
+
+    def account_support(state: GraphState) -> GraphUpdate:
+        prompt = (
+            "You are an account support specialist. Help with login, password, "
+            "profile, access, or verification issues without requesting secrets.\n"
+            f"Support message: {state['message']}\n/no_think"
+        )
+        return {
+            "answer": model.generate(prompt).strip(),
+            "trace": ["account_support: answer generated"],
+        }
+
+    def general_support(state: GraphState) -> GraphUpdate:
+        prompt = (
+            "You are a support triage assistant. Give a helpful first response "
+            "and ask one clarifying question if the issue is unclear.\n"
+            f"Support message: {state['message']}\n/no_think"
+        )
+        return {
+            "answer": model.generate(prompt).strip(),
+            "trace": ["general_support: answer generated"],
         }
 
     def route(state: GraphState) -> Category:
         return state["category"]
 
     builder = StateGraph(GraphState)
-    builder.add_node("classify", classify)
-    builder.add_node("answer_technical", answer_technical)
-    builder.add_node("answer_general", answer_general)
-    builder.add_edge(START, "classify")
+    builder.add_node("classify_ticket", classify_ticket)
+    builder.add_node("billing_support", billing_support)
+    builder.add_node("technical_support", technical_support)
+    builder.add_node("account_support", account_support)
+    builder.add_node("general_support", general_support)
+    builder.add_edge(START, "classify_ticket")
     builder.add_conditional_edges(
-        "classify",
+        "classify_ticket",
         route,
         {
-            "technical": "answer_technical",
-            "general": "answer_general",
+            "billing": "billing_support",
+            "technical": "technical_support",
+            "account": "account_support",
+            "general": "general_support",
         },
     )
-    builder.add_edge("answer_technical", END)
-    builder.add_edge("answer_general", END)
+    builder.add_edge("billing_support", END)
+    builder.add_edge("technical_support", END)
+    builder.add_edge("account_support", END)
+    builder.add_edge("general_support", END)
     return builder.compile()

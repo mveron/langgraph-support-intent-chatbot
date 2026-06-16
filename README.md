@@ -1,16 +1,20 @@
-# LangGraph + Ollama Demo
+# LangGraph Support Chatbot
 
-Educational demo of a conditional graph built with LangGraph, Ollama, and the local `qwen3:4b` model. It includes a command-line interface and a Streamlit app that reuse the same graph to classify a question and route it to a technical or general answer.
+Educational support chatbot built with LangGraph, Ollama, and the local `qwen3:4b` model. It classifies each user message as `billing`, `technical`, `account`, or `general`, then routes the message to a specialized response node.
 
 ## Graph Flow
 
 ```mermaid
 flowchart LR
-    START([START]) --> classify[classify]
-    classify -->|technical| answer_technical[answer_technical]
-    classify -->|general| answer_general[answer_general]
-    answer_technical --> END([END])
-    answer_general --> END
+    START([START]) --> classify_ticket[classify_ticket]
+    classify_ticket -->|billing| billing_support[billing_support]
+    classify_ticket -->|technical| technical_support[technical_support]
+    classify_ticket -->|account| account_support[account_support]
+    classify_ticket -->|general| general_support[general_support]
+    billing_support --> END([END])
+    technical_support --> END
+    account_support --> END
+    general_support --> END
 ```
 
 ## Requirements
@@ -36,7 +40,7 @@ If `ollama list` does not show `qwen3:4b`, download the model:
 ollama pull qwen3:4b
 ```
 
-## Run the Demo
+## Run the Chatbot
 
 CLI:
 
@@ -44,7 +48,7 @@ CLI:
 .\.venv\Scripts\python.exe cli.py
 ```
 
-Streamlit web app:
+Streamlit web chatbot:
 
 ```powershell
 .\.venv\Scripts\streamlit.exe run app.py
@@ -58,19 +62,19 @@ Tests:
 
 ## What to Explain During the Demo
 
-- `GraphState` is the shared state that moves through the graph: question, category, answer, and trace.
+- `GraphState` is the shared state that moves through the graph: support message, category, answer, and trace.
 - Each node reads state and returns only partial updates, such as `category`, `answer`, or new `trace` entries.
-- `add_conditional_edges` decides whether execution continues through `answer_technical` or `answer_general`.
+- `add_conditional_edges` decides whether execution continues through `billing_support`, `technical_support`, `account_support`, or `general_support`.
 - `stream_mode="updates"` lets you observe each graph update step by step.
-- The CLI and web app reuse the same graph defined in `graph.py`; only the presentation layer changes.
+- The CLI and Streamlit chatbot reuse the same graph defined in `graph.py`; only the presentation layer changes.
 
 ## File Structure
 
-- `graph.py`: defines `GraphState`, graph nodes, and conditional edges.
+- `graph.py`: defines `GraphState`, support nodes, and conditional edges.
 - `llm.py`: adapts Ollama as the local text model using `qwen3:4b`.
 - `runner.py`: runs the full graph or streams it step by step.
-- `cli.py`: command-line interface for asking questions.
-- `app.py`: Streamlit interface with route visualization.
+- `cli.py`: command-line chatbot for support messages.
+- `app.py`: Streamlit chat interface with route visualization.
 - `visualization.py`: generates the DOT diagram used by the web app.
 - `tests/`: automated tests for the graph, runner, CLI, LLM, and visualization.
 

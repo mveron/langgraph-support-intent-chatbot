@@ -11,15 +11,15 @@ def run_cli(
     input_fn: Callable[[str], str] = input,
     output_fn: Callable[[str], None] = print,
 ) -> None:
-    output_fn("LangGraph + Ollama demo. Type 'exit' to quit.")
+    output_fn("Support chatbot powered by LangGraph + Ollama. Type 'exit' to quit.")
 
     while True:
-        question = input_fn("\nQuestion: ").strip()
-        if question.lower() in {"", "exit"}:
+        message = input_fn("\nSupport message: ").strip()
+        if message.lower() in {"", "exit"}:
             return
 
         try:
-            events = list(stream_graph(graph, question))
+            events = list(stream_graph(graph, message))
         except OllamaUnavailableError as exc:
             output_fn(f"Error: {exc}")
             continue
