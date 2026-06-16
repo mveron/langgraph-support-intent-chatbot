@@ -17,15 +17,24 @@ def test_stream_graph_yields_execution_events_with_accumulated_state():
 
     assert [event.node for event in events] == [
         "classify_ticket",
+        "assess_ticket_need",
+        "load_ticket_database",
+        "create_ticket",
         "billing_support",
     ]
     assert events[0].state["category"] == "billing"
     assert events[0].state["trace"] == [
         "classify_ticket: category=billing",
     ]
-    assert events[-1].state["answer"] == "Answer"
+    assert events[-1].state["answer"] == (
+        "I created support ticket TCK-1004 with status Open. Answer"
+    )
+    assert events[-1].state["ticket_id"] == "TCK-1004"
     assert events[-1].state["trace"] == [
         "classify_ticket: category=billing",
+        "assess_ticket_need: action=create_ticket",
+        "load_ticket_database: loaded 3 tickets",
+        "create_ticket: ticket_id=TCK-1004",
         "billing_support: answer generated",
     ]
 
@@ -35,10 +44,14 @@ def test_run_graph_returns_final_state():
 
     state = run_graph(graph, "The app crashes")
 
-    assert state["answer"] == "Answer"
+    assert state["answer"] == "I created support ticket TCK-1004 with status Open. Answer"
     assert state["category"] == "technical"
+    assert state["ticket_id"] == "TCK-1004"
     assert state["trace"] == [
         "classify_ticket: category=technical",
+        "assess_ticket_need: action=create_ticket",
+        "load_ticket_database: loaded 3 tickets",
+        "create_ticket: ticket_id=TCK-1004",
         "technical_support: answer generated",
     ]
 
@@ -65,7 +78,7 @@ def test_stream_graph_trace_snapshot_mutation_does_not_contaminate_generator():
 
     assert second.state["trace"] == [
         "classify_ticket: category=account",
-        "account_support: answer generated",
+        "assess_ticket_need: action=create_ticket",
     ]
 
 

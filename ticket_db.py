@@ -35,6 +35,31 @@ def load_ticket_database(path: Path = DEFAULT_TICKET_DB_PATH) -> TicketDatabase:
     return parse_ticket_database(path.read_text(encoding="utf-8"))
 
 
+def next_ticket_id(tickets: TicketDatabase) -> str:
+    highest = 1000
+    for ticket_id in tickets:
+        match = re.fullmatch(r"TCK-(\d{4})", ticket_id)
+        if match:
+            highest = max(highest, int(match.group(1)))
+    return f"TCK-{highest + 1:04d}"
+
+
+def build_mock_ticket_record(category: str, message: str) -> dict[str, str]:
+    owners = {
+        "billing": "Billing",
+        "technical": "Technical Support",
+        "account": "Account Support",
+        "general": "Support Triage",
+    }
+    return {
+        "customer": "Demo User",
+        "status": "Open",
+        "summary": message.strip() or "Support request",
+        "owner": owners.get(category, "Support Triage"),
+        "updated": "2026-06-16",
+    }
+
+
 def extract_ticket_id(text: str) -> str | None:
     prefixed = re.search(r"\bTCK[-\s]?(\d{4})\b", text, flags=re.IGNORECASE)
     if prefixed:

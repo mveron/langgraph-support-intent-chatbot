@@ -8,12 +8,15 @@ from langgraph.graph import END, START, StateGraph
 
 from ticket_db import (
     TicketDatabase,
+    build_mock_ticket_record,
     extract_ticket_id,
     format_ticket_status,
     load_ticket_database as load_mock_ticket_database,
+    next_ticket_id,
 )
 
 Category = Literal["billing", "technical", "account", "ticket_status", "general"]
+TicketAction = Literal["create_ticket", "respond_only"]
 
 
 class ConversationMessage(TypedDict):
@@ -29,6 +32,7 @@ class GraphState(TypedDict, total=False):
     message: Required[str]
     conversation_history: list[ConversationMessage]
     ticket_database: TicketDatabase
+    ticket_action: TicketAction
     ticket_id: str
     ticket_record: dict[str, str]
     category: Category
@@ -39,6 +43,7 @@ class GraphState(TypedDict, total=False):
 class GraphUpdate(TypedDict, total=False):
     conversation_history: list[ConversationMessage]
     ticket_database: TicketDatabase
+    ticket_action: TicketAction
     ticket_id: str
     ticket_record: dict[str, str]
     category: Category
@@ -88,12 +93,77 @@ def find_ticket_id_in_state(state: GraphState) -> str | None:
     return None
 
 
+def should_create_ticket(category: Category, message: str) -> bool:
+    if category not in {"billing", "technical", "account"}:
+        return False
+
+    normalized = message.strip().lower()
+    informational_prefixes = (
+        "how do i",
+        "how can i",
+        "where can i",
+        "what is",
+        "can you explain",
+        "help me understand",
+    )
+    return not normalized.startswith(informational_prefixes)
+
+
+def ticket_context(state: GraphState) -> str:
+    ticket_id = state.get("ticket_id")
+    ticket = state.get("ticket_record")
+    if not ticket_id or not ticket:
+        return "No ticket created for this turn."
+    return (
+        f"Created ticket: {ticket_id}. Status: {ticket.get('status', 'Unknown')}. "
+        f"Owner: {ticket.get('owner', 'Unassigned')}. "
+        f"Summary: {ticket.get('summary', 'No summary available')}."
+    )
+
+
+def add_ticket_notice(state: GraphState, answer: str) -> str:
+    ticket_id = state.get("ticket_id")
+    ticket = state.get("ticket_record")
+    if state.get("ticket_action") != "create_ticket" or not ticket_id or not ticket:
+        return answer
+    return (
+        f"I created support ticket {ticket_id} with status "
+        f"{ticket.get('status', 'Open')}. {answer}"
+    )
+
+
 def build_graph(model: TextModel):
     def load_ticket_database(state: GraphState) -> GraphUpdate:
         tickets = load_mock_ticket_database()
         return {
             "ticket_database": tickets,
             "trace": [f"load_ticket_database: loaded {len(tickets)} tickets"],
+        }
+
+    def assess_ticket_need(state: GraphState) -> GraphUpdate:
+        action: TicketAction = (
+            "create_ticket"
+            if should_create_ticket(state["category"], state["message"])
+            else "respond_only"
+        )
+        return {
+            "ticket_action": action,
+            "trace": [f"assess_ticket_need: action={action}"],
+        }
+
+    def create_ticket(state: GraphState) -> GraphUpdate:
+        ticket_database = dict(state.get("ticket_database", {}))
+        ticket_id = next_ticket_id(ticket_database)
+        ticket_record = build_mock_ticket_record(
+            category=state["category"],
+            message=state["message"],
+        )
+        ticket_database[ticket_id] = ticket_record
+        return {
+            "ticket_database": ticket_database,
+            "ticket_id": ticket_id,
+            "ticket_record": ticket_record,
+            "trace": [f"create_ticket: ticket_id={ticket_id}"],
         }
 
     def classify_ticket(state: GraphState) -> GraphUpdate:
@@ -122,10 +192,12 @@ def build_graph(model: TextModel):
             "You are a billing support specialist. Acknowledge the issue, ask "
             "for invoice or payment details if needed, and explain the next step.\n"
             f"Conversation history:\n{history}\n"
+            f"Ticket context:\n{ticket_context(state)}\n"
             f"Current message: {state['message']}\n/no_think"
         )
+        answer = add_ticket_notice(state, model.generate(prompt).strip())
         return {
-            "answer": model.generate(prompt).strip(),
+            "answer": answer,
             "trace": ["billing_support: answer generated"],
         }
 
@@ -135,10 +207,12 @@ def build_graph(model: TextModel):
             "You are a technical support specialist. Ask for the error message, "
             "environment, and reproduction steps when useful.\n"
             f"Conversation history:\n{history}\n"
+            f"Ticket context:\n{ticket_context(state)}\n"
             f"Current message: {state['message']}\n/no_think"
         )
+        answer = add_ticket_notice(state, model.generate(prompt).strip())
         return {
-            "answer": model.generate(prompt).strip(),
+            "answer": answer,
             "trace": ["technical_support: answer generated"],
         }
 
@@ -148,10 +222,12 @@ def build_graph(model: TextModel):
             "You are an account support specialist. Help with login, password, "
             "profile, access, or verification issues without requesting secrets.\n"
             f"Conversation history:\n{history}\n"
+            f"Ticket context:\n{ticket_context(state)}\n"
             f"Current message: {state['message']}\n/no_think"
         )
+        answer = add_ticket_notice(state, model.generate(prompt).strip())
         return {
-            "answer": model.generate(prompt).strip(),
+            "answer": answer,
             "trace": ["account_support: answer generated"],
         }
 
@@ -209,8 +285,20 @@ def build_graph(model: TextModel):
     def route(state: GraphState) -> Category:
         return state["category"]
 
+    def route_after_assessment(state: GraphState) -> str:
+        if state["ticket_action"] == "create_ticket":
+            return "create_ticket"
+        return f"respond_only_{state['category']}"
+
+    def route_after_database_load(state: GraphState) -> str:
+        if state.get("category") == "ticket_status":
+            return "lookup_ticket_status"
+        return "create_ticket"
+
     builder = StateGraph(GraphState)
     builder.add_node("load_ticket_database", load_ticket_database)
+    builder.add_node("assess_ticket_need", assess_ticket_need)
+    builder.add_node("create_ticket", create_ticket)
     builder.add_node("classify_ticket", classify_ticket)
     builder.add_node("billing_support", billing_support)
     builder.add_node("technical_support", technical_support)
@@ -223,17 +311,43 @@ def build_graph(model: TextModel):
         "classify_ticket",
         route,
         {
+            "technical": "assess_ticket_need",
+            "account": "assess_ticket_need",
+            "billing": "assess_ticket_need",
+            "ticket_status": "load_ticket_database",
+            "general": "general_support",
+        },
+    )
+    builder.add_conditional_edges(
+        "assess_ticket_need",
+        route_after_assessment,
+        {
+            "create_ticket": "load_ticket_database",
+            "respond_only_billing": "billing_support",
+            "respond_only_technical": "technical_support",
+            "respond_only_account": "account_support",
+        },
+    )
+    builder.add_conditional_edges(
+        "load_ticket_database",
+        route_after_database_load,
+        {
+            "create_ticket": "create_ticket",
+            "lookup_ticket_status": "lookup_ticket_status",
+        },
+    )
+    builder.add_conditional_edges(
+        "create_ticket",
+        route,
+        {
             "billing": "billing_support",
             "technical": "technical_support",
             "account": "account_support",
-            "ticket_status": "load_ticket_database",
-            "general": "general_support",
         },
     )
     builder.add_edge("billing_support", END)
     builder.add_edge("technical_support", END)
     builder.add_edge("account_support", END)
-    builder.add_edge("load_ticket_database", "lookup_ticket_status")
     builder.add_edge("lookup_ticket_status", "ticket_status_response")
     builder.add_edge("ticket_status_response", END)
     builder.add_edge("general_support", END)

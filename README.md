@@ -11,6 +11,7 @@ This project is designed for demos and team learning. It is intentionally small 
 - Conversation history across turns.
 - Follow-up handling, such as sharing `TCK-1002` after the bot asks for a ticket ID.
 - A mock ticket database stored in `data/mock_tickets.txt`.
+- Ticket-creation logic for real support incidents.
 - Cost-aware graph design: the ticket database is loaded only when the route needs it.
 - A CLI and an interactive Streamlit web UI that show the same graph execution.
 
@@ -19,15 +20,23 @@ This project is designed for demos and team learning. It is intentionally small 
 ```mermaid
 flowchart LR
     START([START]) --> classify_ticket[classify_ticket]
-    classify_ticket -->|billing| billing_support[billing_support]
-    classify_ticket -->|technical| technical_support[technical_support]
-    classify_ticket -->|account| account_support[account_support]
+    classify_ticket -->|billing| assess_ticket_need[assess_ticket_need]
+    classify_ticket -->|technical| assess_ticket_need
+    classify_ticket -->|account| assess_ticket_need
     classify_ticket -->|ticket_status| load_ticket_database[load_ticket_database]
     classify_ticket -->|general| general_support[general_support]
+    assess_ticket_need -->|create_ticket| load_ticket_database
+    assess_ticket_need -->|respond_only billing| billing_support[billing_support]
+    assess_ticket_need -->|respond_only technical| technical_support[technical_support]
+    assess_ticket_need -->|respond_only account| account_support[account_support]
+    load_ticket_database -->|create| create_ticket[create_ticket]
+    create_ticket -->|billing| billing_support
+    create_ticket -->|technical| technical_support
+    create_ticket -->|account| account_support
     billing_support --> END([END])
     technical_support --> END
     account_support --> END
-    load_ticket_database --> lookup_ticket_status[lookup_ticket_status]
+    load_ticket_database -->|lookup| lookup_ticket_status[lookup_ticket_status]
     lookup_ticket_status --> ticket_status_response[ticket_status_response]
     ticket_status_response --> END
     general_support --> END
@@ -36,7 +45,7 @@ flowchart LR
 
 LangGraph runs once per user turn. The conversational loop happens in the CLI or web app: each new user message starts another graph run, and previous messages are passed into `conversation_history`.
 
-The graph is intentionally cost-aware: it classifies first, then loads the mock ticket database only when the selected route is `ticket_status`. The ticket file loader is cached in-process, so repeated ticket-status turns do not reread the file from disk.
+The graph is intentionally cost-aware: it classifies first, then loads the mock ticket database only when the selected route needs ticket data. That happens for `ticket_status` lookups and for real incidents where `assess_ticket_need` decides to create a support ticket. The ticket file loader is cached in-process, so repeated ticket-related turns do not reread the file from disk.
 
 ## Example Conversation
 
@@ -49,6 +58,15 @@ Bot: TCK-1002 for Contoso is Waiting on Customer. Summary: Duplicate invoice cha
 ```
 
 This works because the second turn includes the previous messages in `conversation_history`, so the graph can understand that `TCK-1002` is a follow-up to a ticket-status request.
+
+Ticket creation example:
+
+```text
+User: The app crashes when I export reports.
+Bot: I created support ticket TCK-1004 with status Open. Please share the error message, environment, and reproduction steps.
+```
+
+The created ticket is a mock record added to the current graph state. The source text file remains the seed database for the demo, which keeps runs predictable while still showing where a real system would write to a database.
 
 ## Requirements
 
@@ -95,10 +113,12 @@ Tests:
 
 ## What to Explain During the Demo
 
-- `GraphState` is the shared state that moves through the graph: support message, conversation history, mock ticket database, ticket ID, category, answer, and trace.
+- `GraphState` is the shared state that moves through the graph: support message, conversation history, mock ticket database, ticket action, ticket ID, category, answer, and trace.
 - Each node reads state and returns only partial updates, such as `category`, `answer`, or new `trace` entries.
-- `add_conditional_edges` decides whether execution continues through `billing_support`, `technical_support`, `account_support`, `load_ticket_database`, or `general_support`.
-- `load_ticket_database` only runs for the `ticket_status` route and uses a cached text-file loader.
+- `add_conditional_edges` decides whether execution continues through a direct support answer, ticket lookup, or ticket creation.
+- `assess_ticket_need` determines whether a billing, technical, or account message needs a ticket or can be answered directly.
+- `create_ticket` creates a mock `Open` ticket in graph state and routes the user to the right support specialist.
+- `load_ticket_database` only runs for routes that need ticket data and uses a cached text-file loader.
 - `lookup_ticket_status` searches the current message first, then previous conversation history, for IDs such as `TCK-1002`.
 - `stream_mode="updates"` lets you observe each graph update step by step.
 - The CLI and Streamlit chatbot reuse the same graph defined in `graph.py`; only the presentation layer changes.
@@ -110,7 +130,7 @@ A simple chatbot can call an LLM directly, but this demo shows where a graph bec
 - Different intents can take different paths.
 - Expensive or unnecessary work can be avoided.
 - Each step is visible and testable.
-- Business logic, such as ticket lookup, can be separated from LLM response generation.
+- Business logic, such as deciding whether to create a ticket or looking up ticket status, can be separated from LLM response generation.
 - The UI can stream graph updates and show what the assistant is doing.
 
 ## File Structure

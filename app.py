@@ -97,9 +97,10 @@ def main() -> None:
         result = st.session_state.result
         st.subheader("Latest Triage Result")
 
-        metric_a, metric_b = st.columns(2)
+        metric_a, metric_b, metric_c = st.columns(3)
         metric_a.metric("Category", result.get("category", "no category"))
-        metric_b.metric("Executed Nodes", len(st.session_state.executed))
+        metric_b.metric("Ticket Action", result.get("ticket_action", "none"))
+        metric_c.metric("Executed Nodes", len(st.session_state.executed))
 
         route = " -> ".join(st.session_state.executed) or "no execution"
         st.write(f"**Route:** {route}")
@@ -114,14 +115,19 @@ def main() -> None:
         ### Concepts
 
         **State:** shared data that moves between nodes, such as the support
-        message, conversation history, mock ticket database, category, answer,
-        and trace.
+        message, conversation history, mock ticket database, ticket action,
+        ticket ID, category, answer, and trace.
 
         **Node:** a graph function that reads state and returns updates.
 
         **Conditional edge:** a decision that chooses the next support route
-        from part of the state, in this case the category. Ticket-status
-        messages go through a lookup node before the response node.
+        from part of the state. First the graph routes by category, then
+        `assess_ticket_need` decides whether to create a ticket or answer
+        directly.
+
+        **Ticket creation:** real support incidents go through
+        `load_ticket_database` and `create_ticket`, then the specialist answer
+        includes the new mock ticket ID.
 
         **Conversation loop:** each user turn starts a new graph run, but the
         previous chat messages are passed into `conversation_history`, so the

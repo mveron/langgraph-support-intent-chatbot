@@ -8,11 +8,15 @@ def test_graph_dot_contains_both_conditional_routes():
     dot = render_dot([])
 
     assert '"START" -> "classify_ticket"' in dot
-    assert '"classify_ticket" -> "billing_support" [label=" billing"]' in dot
-    assert '"classify_ticket" -> "technical_support" [label=" technical"]' in dot
-    assert '"classify_ticket" -> "account_support" [label=" account"]' in dot
+    assert '"classify_ticket" -> "assess_ticket_need" [label=" billing"]' in dot
+    assert '"classify_ticket" -> "assess_ticket_need" [label=" technical"]' in dot
+    assert '"classify_ticket" -> "assess_ticket_need" [label=" account"]' in dot
+    assert '"assess_ticket_need" -> "load_ticket_database" [label=" create_ticket"]' in dot
+    assert '"load_ticket_database" -> "create_ticket" [label=" create"]' in dot
+    assert '"create_ticket" -> "billing_support" [label=" billing"]' in dot
+    assert '"assess_ticket_need" -> "billing_support" [label=" respond_only billing"]' in dot
     assert '"classify_ticket" -> "load_ticket_database" [label=" ticket_status"]' in dot
-    assert '"load_ticket_database" -> "lookup_ticket_status"' in dot
+    assert '"load_ticket_database" -> "lookup_ticket_status" [label=" lookup"]' in dot
     assert '"classify_ticket" -> "general_support" [label=" general"]' in dot
     assert '"lookup_ticket_status" -> "ticket_status_response"' in dot
     assert '"ticket_status_response" -> "END"' in dot

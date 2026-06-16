@@ -1,5 +1,11 @@
 from graph import build_graph, normalize_category
-from ticket_db import extract_ticket_id, format_ticket_status, parse_ticket_database
+from ticket_db import (
+    build_mock_ticket_record,
+    extract_ticket_id,
+    format_ticket_status,
+    next_ticket_id,
+    parse_ticket_database,
+)
 
 
 class FakeModel:
@@ -25,11 +31,19 @@ def test_routes_billing_issue_to_billing_support_node():
     )
 
     assert result["category"] == "billing"
-    assert result["answer"] == "I can help review that charge."
+    assert result["answer"].startswith("I created support ticket TCK-1004")
+    assert "I can help review that charge." in result["answer"]
     assert result["trace"] == [
         "classify_ticket: category=billing",
+        "assess_ticket_need: action=create_ticket",
+        "load_ticket_database: loaded 3 tickets",
+        "create_ticket: ticket_id=TCK-1004",
         "billing_support: answer generated",
     ]
+    assert result["ticket_action"] == "create_ticket"
+    assert result["ticket_id"] == "TCK-1004"
+    assert result["ticket_record"]["status"] == "Open"
+    assert result["ticket_record"]["owner"] == "Billing"
     assert len(model.prompts) == 2
     assert "I was charged twice this month." in model.prompts[0]
     assert "/no_think" in model.prompts[0]
@@ -53,6 +67,9 @@ def test_routes_technical_issue_to_technical_support_node():
     assert result["category"] == "technical"
     assert result["trace"] == [
         "classify_ticket: category=technical",
+        "assess_ticket_need: action=create_ticket",
+        "load_ticket_database: loaded 3 tickets",
+        "create_ticket: ticket_id=TCK-1004",
         "technical_support: answer generated",
     ]
     assert "technical support specialist" in model.prompts[1].lower()
@@ -68,6 +85,7 @@ def test_routes_account_issue_to_account_support_node():
 
     assert result["category"] == "account"
     assert result["trace"][-1] == "account_support: answer generated"
+    assert result["ticket_action"] == "create_ticket"
     assert "account support specialist" in model.prompts[1].lower()
 
 
@@ -107,6 +125,27 @@ def test_unknown_classification_falls_back_to_general():
     assert result["answer"] == "General answer."
     assert result["trace"][-1] == "general_support: answer generated"
     assert "support triage assistant" in model.prompts[1].lower()
+
+
+def test_informational_billing_question_does_not_create_ticket():
+    model = FakeModel(["billing", "You can download invoices from settings."])
+    graph = build_graph(model)
+
+    result = graph.invoke(
+        {
+            "message": "How do I download my invoice?",
+            "conversation_history": [],
+            "trace": [],
+        }
+    )
+
+    assert result["ticket_action"] == "respond_only"
+    assert "ticket_id" not in result
+    assert result["trace"] == [
+        "classify_ticket: category=billing",
+        "assess_ticket_need: action=respond_only",
+        "billing_support: answer generated",
+    ]
 
 
 def test_normalizes_case_and_whitespace_for_billing_category():
@@ -165,18 +204,34 @@ def test_routes_ticket_status_query_to_mock_ticket_lookup():
 
 
 def test_non_ticket_routes_do_not_load_ticket_database():
-    model = FakeModel(["billing", "Billing answer"])
+    model = FakeModel(["general", "General answer"])
     graph = build_graph(model)
 
     result = graph.invoke(
         {
-            "message": "I was charged twice.",
+            "message": "What can this service do?",
             "conversation_history": [],
             "trace": [],
         }
     )
 
     assert "load_ticket_database: loaded 3 tickets" not in result["trace"]
+
+
+def test_created_ticket_context_is_added_to_support_prompt():
+    model = FakeModel(["technical", "Please send logs."])
+    graph = build_graph(model)
+
+    result = graph.invoke(
+        {
+            "message": "The app crashes when I open reports.",
+            "conversation_history": [],
+            "trace": [],
+        }
+    )
+
+    assert "Created ticket: TCK-1004" in model.prompts[1]
+    assert result["answer"].startswith("I created support ticket TCK-1004")
 
 
 def test_ticket_status_uses_ticket_id_from_history_when_follow_up_is_ambiguous():
@@ -229,6 +284,26 @@ def test_parse_ticket_database_and_format_status():
 
     assert tickets["TCK-1002"]["status"] == "Waiting on Customer"
     assert "Contoso" in format_ticket_status("TCK-1002", tickets["TCK-1002"])
+
+
+def test_next_ticket_id_uses_highest_existing_mock_ticket_number():
+    tickets = {
+        "TCK-1002": {"status": "Open"},
+        "TCK-1010": {"status": "Resolved"},
+    }
+
+    assert next_ticket_id(tickets) == "TCK-1011"
+
+
+def test_build_mock_ticket_record_uses_category_owner_and_summary():
+    record = build_mock_ticket_record(
+        category="technical",
+        message="The app crashes when exporting reports.",
+    )
+
+    assert record["status"] == "Open"
+    assert record["owner"] == "Technical Support"
+    assert record["summary"] == "The app crashes when exporting reports."
 
 
 def test_input_schema_requires_message():
