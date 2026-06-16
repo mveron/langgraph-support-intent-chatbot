@@ -28,12 +28,12 @@ def test_run_cli_streams_general_question_and_prints_final_result():
     output = "\n".join(outputs)
     assert "Support chatbot" in output
     assert (
-        "Route: classify_ticket -> assess_ticket_need -> "
+        "Route: prepare_context -> classify_ticket -> assess_ticket_need -> "
         "load_ticket_database -> create_ticket -> billing_support"
     ) in output
     assert "Category: billing" in output
     assert "TCK-1004" in output
-    assert "Answer: I created support ticket TCK-1004" in output
+    assert "Answer: I created support ticket TCK-1004 in the billing_operations queue" in output
 
 
 def test_run_cli_keeps_history_between_chat_turns():

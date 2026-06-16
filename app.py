@@ -15,7 +15,9 @@ def main() -> None:
     st.title("Technical Support Classifier Chatbot")
     st.caption(
         "Chat with a support bot that classifies each message and routes it to "
-        "billing, technical, account, ticket status, or general support."
+        "billing, technical, account, ticket status, or general support. "
+        "The graph can advise, answer questions, or create a mock ticket in "
+        "the right queue."
     )
 
     if "executed" not in st.session_state:
@@ -97,15 +99,19 @@ def main() -> None:
         result = st.session_state.result
         st.subheader("Latest Triage Result")
 
-        metric_a, metric_b, metric_c = st.columns(3)
+        metric_a, metric_b, metric_c, metric_d, metric_e = st.columns(5)
         metric_a.metric("Category", result.get("category", "no category"))
         metric_b.metric("Ticket Action", result.get("ticket_action", "none"))
-        metric_c.metric("Executed Nodes", len(st.session_state.executed))
+        metric_c.metric("Queue", result.get("ticket_queue", "none"))
+        metric_d.metric("Priority", result.get("ticket_priority", "none"))
+        metric_e.metric("Executed Nodes", len(st.session_state.executed))
 
         route = " -> ".join(st.session_state.executed) or "no execution"
         st.write(f"**Route:** {route}")
         if result.get("ticket_id"):
             st.write(f"**Ticket:** {result['ticket_id']}")
+        if result.get("support_reason"):
+            st.write(f"**Reason:** {result['support_reason']}")
 
         with st.expander("Final State"):
             st.json(result)
@@ -121,7 +127,8 @@ def main() -> None:
         **Node:** a graph function that reads state and returns updates.
 
         **Conditional edge:** a decision that chooses the next support route
-        from part of the state. First the graph routes by category, then
+        from part of the state. First `prepare_context` captures the
+        conversation reason, then the graph routes by category, and
         `assess_ticket_need` decides whether to create a ticket or answer
         directly.
 

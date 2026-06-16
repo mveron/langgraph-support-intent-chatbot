@@ -16,21 +16,25 @@ def test_stream_graph_yields_execution_events_with_accumulated_state():
     events = list(stream_graph(graph, "I was charged twice"))
 
     assert [event.node for event in events] == [
+        "prepare_context",
         "classify_ticket",
         "assess_ticket_need",
         "load_ticket_database",
         "create_ticket",
         "billing_support",
     ]
-    assert events[0].state["category"] == "billing"
+    assert events[1].state["category"] == "billing"
     assert events[0].state["trace"] == [
-        "classify_ticket: category=billing",
+        "prepare_context: reason captured",
     ]
     assert events[-1].state["answer"] == (
-        "I created support ticket TCK-1004 with status Open. Answer"
+        "I created support ticket TCK-1004 in the billing_operations queue "
+        "with high priority. Answer"
     )
     assert events[-1].state["ticket_id"] == "TCK-1004"
+    assert events[-1].state["ticket_queue"] == "billing_operations"
     assert events[-1].state["trace"] == [
+        "prepare_context: reason captured",
         "classify_ticket: category=billing",
         "assess_ticket_need: action=create_ticket",
         "load_ticket_database: loaded 3 tickets",
@@ -44,10 +48,15 @@ def test_run_graph_returns_final_state():
 
     state = run_graph(graph, "The app crashes")
 
-    assert state["answer"] == "I created support ticket TCK-1004 with status Open. Answer"
+    assert state["answer"] == (
+        "I created support ticket TCK-1004 in the technical_support_tier_2 "
+        "queue with high priority. Answer"
+    )
     assert state["category"] == "technical"
     assert state["ticket_id"] == "TCK-1004"
+    assert state["ticket_queue"] == "technical_support_tier_2"
     assert state["trace"] == [
+        "prepare_context: reason captured",
         "classify_ticket: category=technical",
         "assess_ticket_need: action=create_ticket",
         "load_ticket_database: loaded 3 tickets",
@@ -63,8 +72,8 @@ def test_stream_graph_events_do_not_share_mutable_trace_state():
     events[0].state["trace"].append("mutated")
 
     assert events[1].state["trace"] == [
+        "prepare_context: reason captured",
         "classify_ticket: category=general",
-        "general_support: answer generated",
     ]
 
 
@@ -77,8 +86,8 @@ def test_stream_graph_trace_snapshot_mutation_does_not_contaminate_generator():
     second = next(iterator)
 
     assert second.state["trace"] == [
+        "prepare_context: reason captured",
         "classify_ticket: category=account",
-        "assess_ticket_need: action=create_ticket",
     ]
 
 
@@ -101,6 +110,7 @@ def test_ticket_database_loads_only_after_ticket_status_classification():
     events = list(stream_graph(graph, "Status for TCK-1002"))
 
     assert [event.node for event in events] == [
+        "prepare_context",
         "classify_ticket",
         "load_ticket_database",
         "lookup_ticket_status",

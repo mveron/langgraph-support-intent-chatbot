@@ -1,5 +1,6 @@
 NODES = (
     "START",
+    "prepare_context",
     "classify_ticket",
     "assess_ticket_need",
     "load_ticket_database",
@@ -14,7 +15,8 @@ NODES = (
 )
 
 EDGES = (
-    '"START" -> "classify_ticket"',
+    '"START" -> "prepare_context"',
+    '"prepare_context" -> "classify_ticket"',
     '"classify_ticket" -> "assess_ticket_need" [label=" billing"]',
     '"classify_ticket" -> "assess_ticket_need" [label=" technical"]',
     '"classify_ticket" -> "assess_ticket_need" [label=" account"]',

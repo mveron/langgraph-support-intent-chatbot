@@ -31,10 +31,15 @@ class TextModel(Protocol):
 class GraphState(TypedDict, total=False):
     message: Required[str]
     conversation_history: list[ConversationMessage]
+    customer_context: str
+    support_reason: str
     ticket_database: TicketDatabase
     ticket_action: TicketAction
     ticket_id: str
     ticket_record: dict[str, str]
+    ticket_queue: str
+    ticket_priority: str
+    ticket_decision_reason: str
     category: Category
     answer: str
     trace: Annotated[list[str], operator.add]
@@ -42,10 +47,15 @@ class GraphState(TypedDict, total=False):
 
 class GraphUpdate(TypedDict, total=False):
     conversation_history: list[ConversationMessage]
+    customer_context: str
+    support_reason: str
     ticket_database: TicketDatabase
     ticket_action: TicketAction
     ticket_id: str
     ticket_record: dict[str, str]
+    ticket_queue: str
+    ticket_priority: str
+    ticket_decision_reason: str
     category: Category
     answer: str
     trace: list[str]
@@ -93,6 +103,60 @@ def find_ticket_id_in_state(state: GraphState) -> str | None:
     return None
 
 
+def last_user_message(history: list[ConversationMessage] | None) -> str | None:
+    for message in reversed(history or []):
+        if message.get("role") == "user" and message.get("content", "").strip():
+            return message["content"].strip()
+    return None
+
+
+def summarize_support_reason(
+    message: str, history: list[ConversationMessage] | None
+) -> str:
+    current = message.strip()
+    previous = last_user_message(history)
+    word_count = len(re.findall(r"\w+", current))
+    if previous and word_count <= 4:
+        return f"Follow-up: {current.rstrip('.')}. Previous issue: {previous}"
+    return current or "Support request"
+
+
+def assign_ticket_queue(category: Category, reason: str) -> str:
+    normalized = reason.lower()
+    if category == "billing":
+        return "billing_operations"
+    if category == "account":
+        return "identity_access"
+    if category == "technical":
+        if any(keyword in normalized for keyword in ("api", "integration", "webhook")):
+            return "technical_integrations"
+        return "technical_support_tier_2"
+    return "support_triage"
+
+
+def infer_ticket_priority(category: Category, reason: str) -> str:
+    normalized = reason.lower()
+    high_keywords = (
+        "charged twice",
+        "cannot log in",
+        "can't log in",
+        "locked out",
+        "crash",
+        "crashes",
+        "500",
+        "down",
+        "outage",
+        "production",
+    )
+    if any(keyword in normalized for keyword in high_keywords):
+        return "high"
+    if category == "billing" and any(
+        keyword in normalized for keyword in ("payment", "charge", "invoice")
+    ):
+        return "normal"
+    return "normal"
+
+
 def should_create_ticket(category: Category, message: str) -> bool:
     if category not in {"billing", "technical", "account"}:
         return False
@@ -116,7 +180,8 @@ def ticket_context(state: GraphState) -> str:
         return "No ticket created for this turn."
     return (
         f"Created ticket: {ticket_id}. Status: {ticket.get('status', 'Unknown')}. "
-        f"Owner: {ticket.get('owner', 'Unassigned')}. "
+        f"Queue: {ticket.get('queue', 'Unassigned')}. "
+        f"Priority: {ticket.get('priority', 'normal')}. "
         f"Summary: {ticket.get('summary', 'No summary available')}."
     )
 
@@ -127,12 +192,21 @@ def add_ticket_notice(state: GraphState, answer: str) -> str:
     if state.get("ticket_action") != "create_ticket" or not ticket_id or not ticket:
         return answer
     return (
-        f"I created support ticket {ticket_id} with status "
-        f"{ticket.get('status', 'Open')}. {answer}"
+        f"I created support ticket {ticket_id} in the "
+        f"{ticket.get('queue', 'support_triage')} queue with "
+        f"{ticket.get('priority', 'normal')} priority. {answer}"
     )
 
 
 def build_graph(model: TextModel):
+    def prepare_context(state: GraphState) -> GraphUpdate:
+        history = state.get("conversation_history", [])
+        return {
+            "customer_context": format_conversation_history(history),
+            "support_reason": summarize_support_reason(state["message"], history),
+            "trace": ["prepare_context: reason captured"],
+        }
+
     def load_ticket_database(state: GraphState) -> GraphUpdate:
         tickets = load_mock_ticket_database()
         return {
@@ -146,8 +220,23 @@ def build_graph(model: TextModel):
             if should_create_ticket(state["category"], state["message"])
             else "respond_only"
         )
+        reason = state.get("support_reason", state["message"])
+        if action == "create_ticket":
+            queue = assign_ticket_queue(state["category"], reason)
+            priority = infer_ticket_priority(state["category"], reason)
+        else:
+            queue = "none"
+            priority = "none"
+        decision_reason = (
+            f"{state['category']} issue requires follow-up by {queue}."
+            if action == "create_ticket"
+            else "Self-service guidance can answer this request."
+        )
         return {
             "ticket_action": action,
+            "ticket_queue": queue,
+            "ticket_priority": priority,
+            "ticket_decision_reason": decision_reason,
             "trace": [f"assess_ticket_need: action={action}"],
         }
 
@@ -157,6 +246,9 @@ def build_graph(model: TextModel):
         ticket_record = build_mock_ticket_record(
             category=state["category"],
             message=state["message"],
+            queue=state.get("ticket_queue", "support_triage"),
+            priority=state.get("ticket_priority", "normal"),
+            reason=state.get("support_reason", state["message"]),
         )
         ticket_database[ticket_id] = ticket_record
         return {
@@ -167,7 +259,9 @@ def build_graph(model: TextModel):
         }
 
     def classify_ticket(state: GraphState) -> GraphUpdate:
-        history = format_conversation_history(state.get("conversation_history"))
+        history = state.get("customer_context") or format_conversation_history(
+            state.get("conversation_history")
+        )
         prompt = (
             "Classify the current support message using the conversation history. "
             "Use billing for invoices, payments, charges, or subscriptions. "
@@ -178,6 +272,7 @@ def build_graph(model: TextModel):
             "Use general only when none of those apply. Answer with exactly one "
             "word from this list: billing, technical, account, ticket_status, general.\n"
             f"Conversation history:\n{history}\n"
+            f"Support reason:\n{state.get('support_reason', state['message'])}\n"
             f"Current message: {state['message']}\n/no_think"
         )
         category = normalize_category(model.generate(prompt))
@@ -187,11 +282,17 @@ def build_graph(model: TextModel):
         }
 
     def billing_support(state: GraphState) -> GraphUpdate:
-        history = format_conversation_history(state.get("conversation_history"))
+        history = state.get("customer_context") or format_conversation_history(
+            state.get("conversation_history")
+        )
         prompt = (
             "You are a billing support specialist. Acknowledge the issue, ask "
             "for invoice or payment details if needed, and explain the next step.\n"
             f"Conversation history:\n{history}\n"
+            f"Support reason: {state.get('support_reason', state['message'])}\n"
+            f"Decision: {state.get('ticket_action', 'respond_only')}\n"
+            f"Queue: {state.get('ticket_queue', 'none')}\n"
+            f"Priority: {state.get('ticket_priority', 'none')}\n"
             f"Ticket context:\n{ticket_context(state)}\n"
             f"Current message: {state['message']}\n/no_think"
         )
@@ -202,11 +303,17 @@ def build_graph(model: TextModel):
         }
 
     def technical_support(state: GraphState) -> GraphUpdate:
-        history = format_conversation_history(state.get("conversation_history"))
+        history = state.get("customer_context") or format_conversation_history(
+            state.get("conversation_history")
+        )
         prompt = (
             "You are a technical support specialist. Ask for the error message, "
             "environment, and reproduction steps when useful.\n"
             f"Conversation history:\n{history}\n"
+            f"Support reason: {state.get('support_reason', state['message'])}\n"
+            f"Decision: {state.get('ticket_action', 'respond_only')}\n"
+            f"Queue: {state.get('ticket_queue', 'none')}\n"
+            f"Priority: {state.get('ticket_priority', 'none')}\n"
             f"Ticket context:\n{ticket_context(state)}\n"
             f"Current message: {state['message']}\n/no_think"
         )
@@ -217,11 +324,17 @@ def build_graph(model: TextModel):
         }
 
     def account_support(state: GraphState) -> GraphUpdate:
-        history = format_conversation_history(state.get("conversation_history"))
+        history = state.get("customer_context") or format_conversation_history(
+            state.get("conversation_history")
+        )
         prompt = (
             "You are an account support specialist. Help with login, password, "
             "profile, access, or verification issues without requesting secrets.\n"
             f"Conversation history:\n{history}\n"
+            f"Support reason: {state.get('support_reason', state['message'])}\n"
+            f"Decision: {state.get('ticket_action', 'respond_only')}\n"
+            f"Queue: {state.get('ticket_queue', 'none')}\n"
+            f"Priority: {state.get('ticket_priority', 'none')}\n"
             f"Ticket context:\n{ticket_context(state)}\n"
             f"Current message: {state['message']}\n/no_think"
         )
@@ -232,11 +345,14 @@ def build_graph(model: TextModel):
         }
 
     def general_support(state: GraphState) -> GraphUpdate:
-        history = format_conversation_history(state.get("conversation_history"))
+        history = state.get("customer_context") or format_conversation_history(
+            state.get("conversation_history")
+        )
         prompt = (
             "You are a support triage assistant. Give a helpful first response "
             "and ask one clarifying question if the issue is unclear.\n"
             f"Conversation history:\n{history}\n"
+            f"Support reason: {state.get('support_reason', state['message'])}\n"
             f"Current message: {state['message']}\n/no_think"
         )
         return {
@@ -296,6 +412,7 @@ def build_graph(model: TextModel):
         return "create_ticket"
 
     builder = StateGraph(GraphState)
+    builder.add_node("prepare_context", prepare_context)
     builder.add_node("load_ticket_database", load_ticket_database)
     builder.add_node("assess_ticket_need", assess_ticket_need)
     builder.add_node("create_ticket", create_ticket)
@@ -306,7 +423,8 @@ def build_graph(model: TextModel):
     builder.add_node("lookup_ticket_status", lookup_ticket_status)
     builder.add_node("ticket_status_response", ticket_status_response)
     builder.add_node("general_support", general_support)
-    builder.add_edge(START, "classify_ticket")
+    builder.add_edge(START, "prepare_context")
+    builder.add_edge("prepare_context", "classify_ticket")
     builder.add_conditional_edges(
         "classify_ticket",
         route,

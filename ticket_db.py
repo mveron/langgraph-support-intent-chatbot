@@ -44,18 +44,30 @@ def next_ticket_id(tickets: TicketDatabase) -> str:
     return f"TCK-{highest + 1:04d}"
 
 
-def build_mock_ticket_record(category: str, message: str) -> dict[str, str]:
+def build_mock_ticket_record(
+    category: str,
+    message: str,
+    queue: str | None = None,
+    priority: str = "normal",
+    reason: str | None = None,
+) -> dict[str, str]:
     owners = {
         "billing": "Billing",
         "technical": "Technical Support",
         "account": "Account Support",
         "general": "Support Triage",
     }
+    summary = (reason or message).strip() or "Support request"
+    owner = queue or owners.get(category, "Support Triage")
     return {
         "customer": "Demo User",
         "status": "Open",
-        "summary": message.strip() or "Support request",
-        "owner": owners.get(category, "Support Triage"),
+        "summary": summary,
+        "reason": summary,
+        "owner": owner,
+        "queue": owner,
+        "priority": priority,
+        "category": category,
         "updated": "2026-06-16",
     }
 
@@ -76,9 +88,12 @@ def format_ticket_status(ticket_id: str, ticket: dict[str, str]) -> str:
     status = ticket.get("status", "Unknown")
     summary = ticket.get("summary", "No summary available")
     owner = ticket.get("owner", "Unassigned")
+    queue = ticket.get("queue", owner)
+    priority = ticket.get("priority", "normal")
     updated = ticket.get("updated", "No update date")
     customer = ticket.get("customer", "Unknown customer")
     return (
         f"{ticket_id} for {customer} is {status}. "
-        f"Summary: {summary}. Owner: {owner}. Last update: {updated}."
+        f"Summary: {summary}. Queue: {queue}. Priority: {priority}. "
+        f"Owner: {owner}. Last update: {updated}."
     )

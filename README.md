@@ -6,12 +6,13 @@ This project is designed for demos and team learning. It is intentionally small 
 
 ## What It Demonstrates
 
+- Conversation context preparation before routing.
 - Intent classification: `billing`, `technical`, `account`, `ticket_status`, or `general`.
 - Conditional graph routing with LangGraph.
 - Conversation history across turns.
 - Follow-up handling, such as sharing `TCK-1002` after the bot asks for a ticket ID.
 - A mock ticket database stored in `data/mock_tickets.txt`.
-- Ticket-creation logic for real support incidents.
+- Ticket-creation logic for real support incidents, including queue and priority assignment.
 - Cost-aware graph design: the ticket database is loaded only when the route needs it.
 - A CLI and an interactive Streamlit web UI that show the same graph execution.
 
@@ -19,7 +20,8 @@ This project is designed for demos and team learning. It is intentionally small 
 
 ```mermaid
 flowchart LR
-    START([START]) --> classify_ticket[classify_ticket]
+    START([START]) --> prepare_context[prepare_context]
+    prepare_context --> classify_ticket[classify_ticket]
     classify_ticket -->|billing| assess_ticket_need[assess_ticket_need]
     classify_ticket -->|technical| assess_ticket_need
     classify_ticket -->|account| assess_ticket_need
@@ -45,7 +47,19 @@ flowchart LR
 
 LangGraph runs once per user turn. The conversational loop happens in the CLI or web app: each new user message starts another graph run, and previous messages are passed into `conversation_history`.
 
-The graph is intentionally cost-aware: it classifies first, then loads the mock ticket database only when the selected route needs ticket data. That happens for `ticket_status` lookups and for real incidents where `assess_ticket_need` decides to create a support ticket. The ticket file loader is cached in-process, so repeated ticket-related turns do not reread the file from disk.
+The graph is intentionally cost-aware: it prepares context and classifies first, then loads the mock ticket database only when the selected route needs ticket data. That happens for `ticket_status` lookups and for real incidents where `assess_ticket_need` decides to create a support ticket. The ticket file loader is cached in-process, so repeated ticket-related turns do not reread the file from disk.
+
+## Production-Like Behavior
+
+The assistant follows a realistic support workflow:
+
+1. `prepare_context` captures the current reason for contact and folds in recent conversation history.
+2. `classify_ticket` determines the motive of the request.
+3. `assess_ticket_need` decides whether the assistant can answer directly or must create a ticket.
+4. `create_ticket` adds a mock ticket to the graph state with `status`, `queue`, `priority`, `reason`, and `summary`.
+5. The specialist node advises the user and confirms the ticket details when a ticket was created.
+
+This keeps the demo small while showing the same orchestration boundary a real system would use before writing to a ticketing platform.
 
 ## Example Conversation
 
@@ -63,7 +77,7 @@ Ticket creation example:
 
 ```text
 User: The app crashes when I export reports.
-Bot: I created support ticket TCK-1004 with status Open. Please share the error message, environment, and reproduction steps.
+Bot: I created support ticket TCK-1004 in the technical_support_tier_2 queue with high priority. Please share the error message, environment, and reproduction steps.
 ```
 
 The created ticket is a mock record added to the current graph state. The source text file remains the seed database for the demo, which keeps runs predictable while still showing where a real system would write to a database.
@@ -113,10 +127,11 @@ Tests:
 
 ## What to Explain During the Demo
 
-- `GraphState` is the shared state that moves through the graph: support message, conversation history, mock ticket database, ticket action, ticket ID, category, answer, and trace.
+- `GraphState` is the shared state that moves through the graph: support message, conversation history, support reason, mock ticket database, ticket action, ticket ID, queue, priority, category, answer, and trace.
 - Each node reads state and returns only partial updates, such as `category`, `answer`, or new `trace` entries.
 - `add_conditional_edges` decides whether execution continues through a direct support answer, ticket lookup, or ticket creation.
-- `assess_ticket_need` determines whether a billing, technical, or account message needs a ticket or can be answered directly.
+- `prepare_context` turns the active conversation into a support reason before classification.
+- `assess_ticket_need` determines whether a billing, technical, or account message needs a ticket or can be answered directly, then assigns queue and priority.
 - `create_ticket` creates a mock `Open` ticket in graph state and routes the user to the right support specialist.
 - `load_ticket_database` only runs for routes that need ticket data and uses a cached text-file loader.
 - `lookup_ticket_status` searches the current message first, then previous conversation history, for IDs such as `TCK-1002`.
