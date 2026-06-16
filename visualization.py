@@ -12,16 +12,16 @@ NODES = (
 )
 
 EDGES = (
-    '"START" -> "load_ticket_database"',
-    '"load_ticket_database" -> "classify_ticket"',
+    '"START" -> "classify_ticket"',
     '"classify_ticket" -> "billing_support" [label=" billing"]',
     '"classify_ticket" -> "technical_support" [label=" technical"]',
     '"classify_ticket" -> "account_support" [label=" account"]',
-    '"classify_ticket" -> "lookup_ticket_status" [label=" ticket_status"]',
+    '"classify_ticket" -> "load_ticket_database" [label=" ticket_status"]',
     '"classify_ticket" -> "general_support" [label=" general"]',
     '"billing_support" -> "END"',
     '"technical_support" -> "END"',
     '"account_support" -> "END"',
+    '"load_ticket_database" -> "lookup_ticket_status"',
     '"lookup_ticket_status" -> "ticket_status_response"',
     '"ticket_status_response" -> "END"',
     '"general_support" -> "END"',

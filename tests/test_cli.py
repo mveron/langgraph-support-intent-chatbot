@@ -27,7 +27,7 @@ def test_run_cli_streams_general_question_and_prints_final_result():
 
     output = "\n".join(outputs)
     assert "Support chatbot" in output
-    assert "load_ticket_database -> classify_ticket -> billing_support" in output
+    assert "Route: classify_ticket -> billing_support" in output
     assert "Category: billing" in output
     assert "Answer: I can help review the charge." in output
 

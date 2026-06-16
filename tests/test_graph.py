@@ -27,7 +27,6 @@ def test_routes_billing_issue_to_billing_support_node():
     assert result["category"] == "billing"
     assert result["answer"] == "I can help review that charge."
     assert result["trace"] == [
-        "load_ticket_database: loaded 3 tickets",
         "classify_ticket: category=billing",
         "billing_support: answer generated",
     ]
@@ -53,7 +52,6 @@ def test_routes_technical_issue_to_technical_support_node():
 
     assert result["category"] == "technical"
     assert result["trace"] == [
-        "load_ticket_database: loaded 3 tickets",
         "classify_ticket: category=technical",
         "technical_support: answer generated",
     ]
@@ -88,7 +86,6 @@ def test_routes_general_issue_to_general_support_node():
     assert result["category"] == "general"
     assert result["answer"] == "I can help with that."
     assert result["trace"] == [
-        "load_ticket_database: loaded 3 tickets",
         "classify_ticket: category=general",
         "general_support: answer generated",
     ]
@@ -160,11 +157,26 @@ def test_routes_ticket_status_query_to_mock_ticket_lookup():
     assert "Waiting on Customer" in result["answer"]
     assert "Duplicate invoice charge" in result["answer"]
     assert result["trace"] == [
-        "load_ticket_database: loaded 3 tickets",
         "classify_ticket: category=ticket_status",
+        "load_ticket_database: loaded 3 tickets",
         "lookup_ticket_status: ticket_id=TCK-1002",
         "ticket_status_response: answer generated",
     ]
+
+
+def test_non_ticket_routes_do_not_load_ticket_database():
+    model = FakeModel(["billing", "Billing answer"])
+    graph = build_graph(model)
+
+    result = graph.invoke(
+        {
+            "message": "I was charged twice.",
+            "conversation_history": [],
+            "trace": [],
+        }
+    )
+
+    assert "load_ticket_database: loaded 3 tickets" not in result["trace"]
 
 
 def test_ticket_status_uses_ticket_id_from_history_when_follow_up_is_ambiguous():

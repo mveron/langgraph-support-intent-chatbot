@@ -218,8 +218,7 @@ def build_graph(model: TextModel):
     builder.add_node("lookup_ticket_status", lookup_ticket_status)
     builder.add_node("ticket_status_response", ticket_status_response)
     builder.add_node("general_support", general_support)
-    builder.add_edge(START, "load_ticket_database")
-    builder.add_edge("load_ticket_database", "classify_ticket")
+    builder.add_edge(START, "classify_ticket")
     builder.add_conditional_edges(
         "classify_ticket",
         route,
@@ -227,13 +226,14 @@ def build_graph(model: TextModel):
             "billing": "billing_support",
             "technical": "technical_support",
             "account": "account_support",
-            "ticket_status": "lookup_ticket_status",
+            "ticket_status": "load_ticket_database",
             "general": "general_support",
         },
     )
     builder.add_edge("billing_support", END)
     builder.add_edge("technical_support", END)
     builder.add_edge("account_support", END)
+    builder.add_edge("load_ticket_database", "lookup_ticket_status")
     builder.add_edge("lookup_ticket_status", "ticket_status_response")
     builder.add_edge("ticket_status_response", END)
     builder.add_edge("general_support", END)

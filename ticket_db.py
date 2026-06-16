@@ -1,3 +1,4 @@
+from functools import lru_cache
 from pathlib import Path
 import re
 
@@ -29,6 +30,7 @@ def parse_ticket_database(raw_text: str) -> TicketDatabase:
     return tickets
 
 
+@lru_cache(maxsize=4)
 def load_ticket_database(path: Path = DEFAULT_TICKET_DB_PATH) -> TicketDatabase:
     return parse_ticket_database(path.read_text(encoding="utf-8"))
 

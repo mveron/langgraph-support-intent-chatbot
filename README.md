@@ -13,16 +13,16 @@ The app now behaves like a small corporate support assistant:
 
 ```mermaid
 flowchart LR
-    START([START]) --> load_ticket_database[load_ticket_database]
-    load_ticket_database --> classify_ticket[classify_ticket]
+    START([START]) --> classify_ticket[classify_ticket]
     classify_ticket -->|billing| billing_support[billing_support]
     classify_ticket -->|technical| technical_support[technical_support]
     classify_ticket -->|account| account_support[account_support]
-    classify_ticket -->|ticket_status| lookup_ticket_status[lookup_ticket_status]
+    classify_ticket -->|ticket_status| load_ticket_database[load_ticket_database]
     classify_ticket -->|general| general_support[general_support]
     billing_support --> END([END])
     technical_support --> END
     account_support --> END
+    load_ticket_database --> lookup_ticket_status[lookup_ticket_status]
     lookup_ticket_status --> ticket_status_response[ticket_status_response]
     ticket_status_response --> END
     general_support --> END
@@ -30,6 +30,8 @@ flowchart LR
 ```
 
 LangGraph runs once per user turn. The conversational loop happens in the CLI or web app: each new user message starts another graph run, and previous messages are passed into `conversation_history`.
+
+The graph is intentionally cost-aware: it classifies first, then loads the mock ticket database only when the selected route is `ticket_status`. The ticket file loader is cached in-process, so repeated ticket-status turns do not reread the file from disk.
 
 ## Requirements
 
@@ -87,7 +89,8 @@ Tests:
 
 - `GraphState` is the shared state that moves through the graph: support message, conversation history, mock ticket database, ticket ID, category, answer, and trace.
 - Each node reads state and returns only partial updates, such as `category`, `answer`, or new `trace` entries.
-- `add_conditional_edges` decides whether execution continues through `billing_support`, `technical_support`, `account_support`, `lookup_ticket_status`, or `general_support`.
+- `add_conditional_edges` decides whether execution continues through `billing_support`, `technical_support`, `account_support`, `load_ticket_database`, or `general_support`.
+- `load_ticket_database` only runs for the `ticket_status` route and uses a cached text-file loader.
 - `lookup_ticket_status` searches the current message first, then previous conversation history, for IDs such as `TCK-1002`.
 - `stream_mode="updates"` lets you observe each graph update step by step.
 - The CLI and Streamlit chatbot reuse the same graph defined in `graph.py`; only the presentation layer changes.

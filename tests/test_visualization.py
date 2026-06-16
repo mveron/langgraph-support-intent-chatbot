@@ -7,12 +7,12 @@ def render_dot(executed: list[str]) -> str:
 def test_graph_dot_contains_both_conditional_routes():
     dot = render_dot([])
 
-    assert '"START" -> "load_ticket_database"' in dot
-    assert '"load_ticket_database" -> "classify_ticket"' in dot
+    assert '"START" -> "classify_ticket"' in dot
     assert '"classify_ticket" -> "billing_support" [label=" billing"]' in dot
     assert '"classify_ticket" -> "technical_support" [label=" technical"]' in dot
     assert '"classify_ticket" -> "account_support" [label=" account"]' in dot
-    assert '"classify_ticket" -> "lookup_ticket_status" [label=" ticket_status"]' in dot
+    assert '"classify_ticket" -> "load_ticket_database" [label=" ticket_status"]' in dot
+    assert '"load_ticket_database" -> "lookup_ticket_status"' in dot
     assert '"classify_ticket" -> "general_support" [label=" general"]' in dot
     assert '"lookup_ticket_status" -> "ticket_status_response"' in dot
     assert '"ticket_status_response" -> "END"' in dot

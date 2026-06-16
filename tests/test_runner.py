@@ -16,18 +16,15 @@ def test_stream_graph_yields_execution_events_with_accumulated_state():
     events = list(stream_graph(graph, "I was charged twice"))
 
     assert [event.node for event in events] == [
-        "load_ticket_database",
         "classify_ticket",
         "billing_support",
     ]
-    assert events[1].state["category"] == "billing"
-    assert events[1].state["trace"] == [
-        "load_ticket_database: loaded 3 tickets",
+    assert events[0].state["category"] == "billing"
+    assert events[0].state["trace"] == [
         "classify_ticket: category=billing",
     ]
     assert events[-1].state["answer"] == "Answer"
     assert events[-1].state["trace"] == [
-        "load_ticket_database: loaded 3 tickets",
         "classify_ticket: category=billing",
         "billing_support: answer generated",
     ]
@@ -41,7 +38,6 @@ def test_run_graph_returns_final_state():
     assert state["answer"] == "Answer"
     assert state["category"] == "technical"
     assert state["trace"] == [
-        "load_ticket_database: loaded 3 tickets",
         "classify_ticket: category=technical",
         "technical_support: answer generated",
     ]
@@ -54,8 +50,8 @@ def test_stream_graph_events_do_not_share_mutable_trace_state():
     events[0].state["trace"].append("mutated")
 
     assert events[1].state["trace"] == [
-        "load_ticket_database: loaded 3 tickets",
         "classify_ticket: category=general",
+        "general_support: answer generated",
     ]
 
 
@@ -68,8 +64,8 @@ def test_stream_graph_trace_snapshot_mutation_does_not_contaminate_generator():
     second = next(iterator)
 
     assert second.state["trace"] == [
-        "load_ticket_database: loaded 3 tickets",
         "classify_ticket: category=account",
+        "account_support: answer generated",
     ]
 
 
@@ -84,6 +80,19 @@ def test_stream_graph_passes_conversation_history_into_initial_state():
     assert events[0].state["conversation_history"] == history
     assert events[-1].state["ticket_id"] == "TCK-1002"
     assert "Waiting on Customer" in events[-1].state["answer"]
+
+
+def test_ticket_database_loads_only_after_ticket_status_classification():
+    graph = build_graph(FakeModel(["ticket_status"]))
+
+    events = list(stream_graph(graph, "Status for TCK-1002"))
+
+    assert [event.node for event in events] == [
+        "classify_ticket",
+        "load_ticket_database",
+        "lookup_ticket_status",
+        "ticket_status_response",
+    ]
 
 
 def test_stream_graph_snapshots_do_not_share_mutable_history_state():
