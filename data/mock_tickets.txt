@@ -1,0 +1,3 @@
+TCK-1001 | customer: ACME Corp | status: In Progress | summary: Login token invalid after SSO migration | owner: Support Tier 2 | updated: 2026-06-15
+TCK-1002 | customer: Contoso | status: Waiting on Customer | summary: Duplicate invoice charge | owner: Billing | updated: 2026-06-14
+TCK-1003 | customer: Globex | status: Resolved | summary: Password reset email delayed | owner: Account Support | updated: 2026-06-13

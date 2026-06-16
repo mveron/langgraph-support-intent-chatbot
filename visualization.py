@@ -1,23 +1,31 @@
 NODES = (
     "START",
+    "load_ticket_database",
     "classify_ticket",
     "billing_support",
     "technical_support",
     "account_support",
+    "lookup_ticket_status",
+    "ticket_status_response",
     "general_support",
     "END",
 )
 
 EDGES = (
-    '"START" -> "classify_ticket"',
+    '"START" -> "load_ticket_database"',
+    '"load_ticket_database" -> "classify_ticket"',
     '"classify_ticket" -> "billing_support" [label=" billing"]',
     '"classify_ticket" -> "technical_support" [label=" technical"]',
     '"classify_ticket" -> "account_support" [label=" account"]',
+    '"classify_ticket" -> "lookup_ticket_status" [label=" ticket_status"]',
     '"classify_ticket" -> "general_support" [label=" general"]',
     '"billing_support" -> "END"',
     '"technical_support" -> "END"',
     '"account_support" -> "END"',
+    '"lookup_ticket_status" -> "ticket_status_response"',
+    '"ticket_status_response" -> "END"',
     '"general_support" -> "END"',
+    '"END" -> "START" [style=dashed, label=" next user turn"]',
 )
 
 EXECUTED_COLOR = "#22c55e"

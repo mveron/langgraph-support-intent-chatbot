@@ -1,8 +1,9 @@
 from collections.abc import Iterator
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
-from graph import GraphState, GraphUpdate
+from graph import ConversationMessage, GraphState, GraphUpdate
 
 
 @dataclass(frozen=True)
@@ -16,11 +17,27 @@ def _snapshot_state(state: GraphState) -> GraphState:
     snapshot: GraphState = dict(state)
     if "trace" in snapshot:
         snapshot["trace"] = list(snapshot["trace"])
+    if "conversation_history" in snapshot:
+        snapshot["conversation_history"] = [
+            dict(message) for message in snapshot["conversation_history"]
+        ]
+    if "ticket_database" in snapshot:
+        snapshot["ticket_database"] = deepcopy(snapshot["ticket_database"])
+    if "ticket_record" in snapshot:
+        snapshot["ticket_record"] = dict(snapshot["ticket_record"])
     return snapshot
 
 
-def stream_graph(graph: Any, message: str) -> Iterator[StepEvent]:
-    state: GraphState = {"message": message, "trace": []}
+def stream_graph(
+    graph: Any,
+    message: str,
+    conversation_history: list[ConversationMessage] | None = None,
+) -> Iterator[StepEvent]:
+    state: GraphState = {
+        "message": message,
+        "conversation_history": [dict(item) for item in conversation_history or []],
+        "trace": [],
+    }
 
     for chunk in graph.stream(state, stream_mode="updates"):
         for node, update in chunk.items():
@@ -32,10 +49,18 @@ def stream_graph(graph: Any, message: str) -> Iterator[StepEvent]:
             yield StepEvent(node=node, update=update, state=_snapshot_state(state))
 
 
-def run_graph(graph: Any, message: str) -> GraphState:
-    state: GraphState = {"message": message, "trace": []}
+def run_graph(
+    graph: Any,
+    message: str,
+    conversation_history: list[ConversationMessage] | None = None,
+) -> GraphState:
+    state: GraphState = {
+        "message": message,
+        "conversation_history": [dict(item) for item in conversation_history or []],
+        "trace": [],
+    }
 
-    for event in stream_graph(graph, message):
+    for event in stream_graph(graph, message, conversation_history=conversation_history):
         state = event.state
 
     return state

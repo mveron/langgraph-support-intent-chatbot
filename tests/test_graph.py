@@ -1,4 +1,5 @@
 from graph import build_graph, normalize_category
+from ticket_db import extract_ticket_id, format_ticket_status, parse_ticket_database
 
 
 class FakeModel:
@@ -15,11 +16,18 @@ def test_routes_billing_issue_to_billing_support_node():
     model = FakeModel(["billing", "I can help review that charge."])
     graph = build_graph(model)
 
-    result = graph.invoke({"message": "I was charged twice this month.", "trace": []})
+    result = graph.invoke(
+        {
+            "message": "I was charged twice this month.",
+            "conversation_history": [],
+            "trace": [],
+        }
+    )
 
     assert result["category"] == "billing"
     assert result["answer"] == "I can help review that charge."
     assert result["trace"] == [
+        "load_ticket_database: loaded 3 tickets",
         "classify_ticket: category=billing",
         "billing_support: answer generated",
     ]
@@ -35,10 +43,17 @@ def test_routes_technical_issue_to_technical_support_node():
     model = FakeModel(["technical", "Please share the error message."])
     graph = build_graph(model)
 
-    result = graph.invoke({"message": "The app crashes on startup.", "trace": []})
+    result = graph.invoke(
+        {
+            "message": "The app crashes on startup.",
+            "conversation_history": [],
+            "trace": [],
+        }
+    )
 
     assert result["category"] == "technical"
     assert result["trace"] == [
+        "load_ticket_database: loaded 3 tickets",
         "classify_ticket: category=technical",
         "technical_support: answer generated",
     ]
@@ -49,7 +64,9 @@ def test_routes_account_issue_to_account_support_node():
     model = FakeModel(["account", "Let's recover your account."])
     graph = build_graph(model)
 
-    result = graph.invoke({"message": "I cannot log in.", "trace": []})
+    result = graph.invoke(
+        {"message": "I cannot log in.", "conversation_history": [], "trace": []}
+    )
 
     assert result["category"] == "account"
     assert result["trace"][-1] == "account_support: answer generated"
@@ -60,11 +77,18 @@ def test_routes_general_issue_to_general_support_node():
     model = FakeModel(["general", "I can help with that."])
     graph = build_graph(model)
 
-    result = graph.invoke({"message": "What can this service do?", "trace": []})
+    result = graph.invoke(
+        {
+            "message": "What can this service do?",
+            "conversation_history": [],
+            "trace": [],
+        }
+    )
 
     assert result["category"] == "general"
     assert result["answer"] == "I can help with that."
     assert result["trace"] == [
+        "load_ticket_database: loaded 3 tickets",
         "classify_ticket: category=general",
         "general_support: answer generated",
     ]
@@ -78,7 +102,9 @@ def test_unknown_classification_falls_back_to_general():
     model = FakeModel(["not sure", "General answer."])
     graph = build_graph(model)
 
-    result = graph.invoke({"message": "Ambiguous issue", "trace": []})
+    result = graph.invoke(
+        {"message": "Ambiguous issue", "conversation_history": [], "trace": []}
+    )
 
     assert result["category"] == "general"
     assert result["answer"] == "General answer."
@@ -88,6 +114,109 @@ def test_unknown_classification_falls_back_to_general():
 
 def test_normalizes_case_and_whitespace_for_billing_category():
     assert normalize_category("  BILLING\n") == "billing"
+
+
+def test_normalizes_ticket_status_with_punctuation():
+    assert normalize_category("Ticket_Status.\n") == "ticket_status"
+
+
+def test_classifier_prompt_includes_conversation_history():
+    model = FakeModel(["ticket_status", "unused"])
+    graph = build_graph(model)
+
+    graph.invoke(
+        {
+            "message": "What about it?",
+            "conversation_history": [
+                {"role": "user", "content": "My ticket is TCK-1002."},
+                {
+                    "role": "assistant",
+                    "content": "I can check that if you ask for status.",
+                },
+            ],
+            "trace": [],
+        }
+    )
+
+    assert "Conversation history:" in model.prompts[0]
+    assert "user: My ticket is TCK-1002." in model.prompts[0]
+    assert "Current message: What about it?" in model.prompts[0]
+
+
+def test_routes_ticket_status_query_to_mock_ticket_lookup():
+    model = FakeModel(["ticket_status"])
+    graph = build_graph(model)
+
+    result = graph.invoke(
+        {
+            "message": "Can you check TCK-1002?",
+            "conversation_history": [],
+            "trace": [],
+        }
+    )
+
+    assert result["category"] == "ticket_status"
+    assert result["ticket_id"] == "TCK-1002"
+    assert "Waiting on Customer" in result["answer"]
+    assert "Duplicate invoice charge" in result["answer"]
+    assert result["trace"] == [
+        "load_ticket_database: loaded 3 tickets",
+        "classify_ticket: category=ticket_status",
+        "lookup_ticket_status: ticket_id=TCK-1002",
+        "ticket_status_response: answer generated",
+    ]
+
+
+def test_ticket_status_uses_ticket_id_from_history_when_follow_up_is_ambiguous():
+    model = FakeModel(["ticket_status"])
+    graph = build_graph(model)
+
+    result = graph.invoke(
+        {
+            "message": "What is the latest status?",
+            "conversation_history": [
+                {"role": "user", "content": "My ticket number is TCK-1003."},
+            ],
+            "trace": [],
+        }
+    )
+
+    assert result["ticket_id"] == "TCK-1003"
+    assert "Resolved" in result["answer"]
+
+
+def test_ticket_status_asks_for_ticket_id_when_missing():
+    model = FakeModel(["ticket_status"])
+    graph = build_graph(model)
+
+    result = graph.invoke(
+        {
+            "message": "Can you check my ticket?",
+            "conversation_history": [],
+            "trace": [],
+        }
+    )
+
+    assert "Please share your ticket ID" in result["answer"]
+    assert result["trace"][-2:] == [
+        "lookup_ticket_status: ticket_id=missing",
+        "ticket_status_response: answer generated",
+    ]
+
+
+def test_extract_ticket_id_accepts_prefixed_and_plain_ticket_numbers():
+    assert extract_ticket_id("Please check TCK-1002") == "TCK-1002"
+    assert extract_ticket_id("ticket 1003") == "TCK-1003"
+
+
+def test_parse_ticket_database_and_format_status():
+    tickets = parse_ticket_database(
+        "TCK-1002 | customer: Contoso | status: Waiting on Customer | "
+        "summary: Duplicate invoice charge | owner: Billing | updated: 2026-06-14"
+    )
+
+    assert tickets["TCK-1002"]["status"] == "Waiting on Customer"
+    assert "Contoso" in format_ticket_status("TCK-1002", tickets["TCK-1002"])
 
 
 def test_input_schema_requires_message():

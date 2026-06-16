@@ -15,7 +15,7 @@ def main() -> None:
     st.title("Technical Support Classifier Chatbot")
     st.caption(
         "Chat with a support bot that classifies each message and routes it to "
-        "billing, technical, account, or general support."
+        "billing, technical, account, ticket status, or general support."
     )
 
     if "executed" not in st.session_state:
@@ -33,7 +33,8 @@ def main() -> None:
         graph_slot.graphviz_chart(graph_dot(st.session_state.executed))
         st.write(
             "Green nodes ran for the latest message. Blue nodes were not part "
-            "of the selected support route."
+            "of the selected support route. The dashed edge represents the next "
+            "user turn re-entering the graph with conversation history."
         )
 
     with right:
@@ -43,10 +44,11 @@ def main() -> None:
                 st.write(message["content"])
 
         prompt = st.chat_input(
-            "Describe your support issue, e.g. I was charged twice"
+            "Ask about support, e.g. What is the status of TCK-1002?"
         )
 
         if prompt:
+            conversation_history = list(st.session_state.messages)
             st.session_state.messages.append({"role": "user", "content": prompt})
             st.session_state.executed = []
             st.session_state.result = None
@@ -57,8 +59,14 @@ def main() -> None:
 
             try:
                 graph = build_graph(OllamaTextModel())
-                with st.status("Classifying support message...", expanded=True) as status:
-                    for event in stream_graph(graph, prompt):
+                with st.status(
+                    "Running support chatbot graph...", expanded=True
+                ) as status:
+                    for event in stream_graph(
+                        graph,
+                        prompt,
+                        conversation_history=conversation_history,
+                    ):
                         st.session_state.executed.append(event.node)
                         graph_slot.graphviz_chart(graph_dot(st.session_state.executed))
                         st.write(f"Executed node: `{event.node}`")
@@ -95,6 +103,8 @@ def main() -> None:
 
         route = " -> ".join(st.session_state.executed) or "no execution"
         st.write(f"**Route:** {route}")
+        if result.get("ticket_id"):
+            st.write(f"**Ticket:** {result['ticket_id']}")
 
         with st.expander("Final State"):
             st.json(result)
@@ -104,12 +114,18 @@ def main() -> None:
         ### Concepts
 
         **State:** shared data that moves between nodes, such as the support
-        message, category, answer, and trace.
+        message, conversation history, mock ticket database, category, answer,
+        and trace.
 
         **Node:** a graph function that reads state and returns updates.
 
         **Conditional edge:** a decision that chooses the next support route
-        from part of the state, in this case the category.
+        from part of the state, in this case the category. Ticket-status
+        messages go through a lookup node before the response node.
+
+        **Conversation loop:** each user turn starts a new graph run, but the
+        previous chat messages are passed into `conversation_history`, so the
+        graph can resolve follow-ups such as "what about that ticket?"
 
         **Stream:** step-by-step execution events that show the path as it runs.
         """
