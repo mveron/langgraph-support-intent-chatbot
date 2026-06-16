@@ -6,6 +6,21 @@ from runner import stream_graph
 from visualization import graph_dot
 
 
+CHAT_HISTORY_HEIGHT = 320
+
+
+def render_chat_history(messages: list[dict[str, str]], streamlit_module=st):
+    history_container = streamlit_module.container(
+        height=CHAT_HISTORY_HEIGHT,
+        border=True,
+    )
+    with history_container:
+        for message in messages:
+            with streamlit_module.chat_message(message["role"]):
+                streamlit_module.write(message["content"])
+    return history_container
+
+
 def main() -> None:
     st.set_page_config(
         page_title="LangGraph + Ollama",
@@ -41,9 +56,7 @@ def main() -> None:
 
     with right:
         st.subheader("Chat")
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                st.write(message["content"])
+        chat_history = render_chat_history(st.session_state.messages)
 
         prompt = st.chat_input(
             "Ask about support, e.g. What is the status of TCK-1002?"
@@ -56,8 +69,9 @@ def main() -> None:
             st.session_state.result = None
             graph_slot.graphviz_chart(graph_dot(st.session_state.executed))
 
-            with st.chat_message("user"):
-                st.write(prompt)
+            with chat_history:
+                with st.chat_message("user"):
+                    st.write(prompt)
 
             try:
                 graph = build_graph(OllamaTextModel())
@@ -86,8 +100,9 @@ def main() -> None:
                 st.session_state.messages.append(
                     {"role": "assistant", "content": answer}
                 )
-                with st.chat_message("assistant"):
-                    st.write(answer)
+                with chat_history:
+                    with st.chat_message("assistant"):
+                        st.write(answer)
             except OllamaUnavailableError as exc:
                 error = str(exc)
                 st.session_state.messages.append(
