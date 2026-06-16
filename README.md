@@ -1,13 +1,18 @@
-# LangGraph Support Chatbot
+# LangGraph Support Intent Chatbot
 
-Educational support chatbot built with LangGraph, Ollama, and the local `qwen3:4b` model. It classifies each user message as `billing`, `technical`, `account`, `ticket_status`, or `general`, then routes the message to a specialized response node.
+A small, real-world LangGraph demo that behaves like a corporate support assistant. It uses Ollama with the local `qwen3:4b` model to classify user intent, route the conversation through a graph, and answer simple support-ticket status questions from a mock text database.
 
-The app now behaves like a small corporate support assistant:
+This project is designed for demos and team learning. It is intentionally small enough to explain in a meeting, but realistic enough to show why graph-based orchestration is useful.
 
-- It keeps conversation history across turns.
-- It can answer follow-up messages such as `what is the latest status?` after the user already shared a ticket ID.
-- It loads mock tickets from `data/mock_tickets.txt`.
-- It shows the graph route step by step in the Streamlit UI.
+## What It Demonstrates
+
+- Intent classification: `billing`, `technical`, `account`, `ticket_status`, or `general`.
+- Conditional graph routing with LangGraph.
+- Conversation history across turns.
+- Follow-up handling, such as sharing `TCK-1002` after the bot asks for a ticket ID.
+- A mock ticket database stored in `data/mock_tickets.txt`.
+- Cost-aware graph design: the ticket database is loaded only when the route needs it.
+- A CLI and an interactive Streamlit web UI that show the same graph execution.
 
 ## Graph Flow
 
@@ -33,6 +38,18 @@ LangGraph runs once per user turn. The conversational loop happens in the CLI or
 
 The graph is intentionally cost-aware: it classifies first, then loads the mock ticket database only when the selected route is `ticket_status`. The ticket file loader is cached in-process, so repeated ticket-status turns do not reread the file from disk.
 
+## Example Conversation
+
+```text
+User: Can you check my ticket?
+Bot: I can check that. Please share your ticket ID (for example, TCK-1002).
+
+User: TCK-1002
+Bot: TCK-1002 for Contoso is Waiting on Customer. Summary: Duplicate invoice charge. Owner: Billing. Last update: 2026-06-14.
+```
+
+This works because the second turn includes the previous messages in `conversation_history`, so the graph can understand that `TCK-1002` is a follow-up to a ticket-status request.
+
 ## Requirements
 
 - Python 3.11+
@@ -56,7 +73,7 @@ If `ollama list` does not show `qwen3:4b`, download the model:
 ollama pull qwen3:4b
 ```
 
-## Run the Chatbot
+## Run the Demo
 
 CLI:
 
@@ -68,15 +85,6 @@ Streamlit web chatbot:
 
 ```powershell
 .\.venv\Scripts\streamlit.exe run app.py
-```
-
-Try this conversation:
-
-```text
-User: Can you check my ticket?
-Bot: I can check that. Please share your ticket ID (for example, TCK-1002).
-User: TCK-1002
-Bot: TCK-1002 for Contoso is Waiting on Customer...
 ```
 
 Tests:
@@ -94,6 +102,16 @@ Tests:
 - `lookup_ticket_status` searches the current message first, then previous conversation history, for IDs such as `TCK-1002`.
 - `stream_mode="updates"` lets you observe each graph update step by step.
 - The CLI and Streamlit chatbot reuse the same graph defined in `graph.py`; only the presentation layer changes.
+
+## Why LangGraph Here
+
+A simple chatbot can call an LLM directly, but this demo shows where a graph becomes useful:
+
+- Different intents can take different paths.
+- Expensive or unnecessary work can be avoided.
+- Each step is visible and testable.
+- Business logic, such as ticket lookup, can be separated from LLM response generation.
+- The UI can stream graph updates and show what the assistant is doing.
 
 ## File Structure
 
